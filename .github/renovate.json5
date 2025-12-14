@@ -6,4 +6,7 @@
     "github>rostvik/.github//.renovate/workflows.json5",
     "github>rostvik/box-utility//.renovate/customManagers.json5",
   ],
+  ignorePaths: [
+    "requirements.txt",
+  ],
 }
