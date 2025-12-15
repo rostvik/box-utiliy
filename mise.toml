@@ -10,13 +10,20 @@ usage = "2.10.0"
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
 _.file = ["{{config_root}}/.env"]
-_.python.venv = { path = ".venv", create = true } # relative to this file's directory
+_.python.venv = { path = ".venv", create = false } # relative to this file's directory
 
 [settings]
 python.uv_venv_auto = true
+experimental = true
+
+[tasks.venv_create]
+description = "Create Python virtual environment"
+run = "python -m venv .venv"
+hide = true
 
 [tasks.build_deps]
 description = "Build dependencies"
+depends = ["venv_create"]
 run = "uv pip compile requirements.in --universal --output-file requirements.txt"
 hide = true
 
@@ -31,7 +38,7 @@ depends = ["install_python", "install_node"]
 
 [tasks.install_python]
 description = "Install python dependencies"
-depends = ["build_deps", "install_pre-commit"]
+depends = ["venv_create", "build_deps", "install_pre-commit"]
 run = "uv pip sync requirements.txt"
 
 [tasks.install_node]
