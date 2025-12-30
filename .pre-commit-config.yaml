@@ -35,3 +35,14 @@ repos:
       - id: uv-export
       - id: pip-compile
         args: [requirements.in, -o, requirements.txt]
+
+  - repo: local
+    hooks:
+      - id: docsible
+        files: ^roles/
+        name: Docsible
+        description: Generate documentation for Ansible roles
+        pass_filenames: false
+        verbose: true
+        language: script
+        entry: .pre-commit/docsible.sh
