@@ -1,0 +1,7 @@
+netboot_container_user: root
+netboot_container_group: root
+netboot_base_dir: ""
+
+netboot_mac_chain: []
+
+netboot_talos_schematic: ""

@@ -1,0 +1,20 @@
+#!ipxe
+
+goto genuuid
+
+:genuuid
+
+set assets http://10.0.0.14:8080/gen-uuid
+
+echo Mirror URL: ${assets}
+
+echo ${cls}
+
+goto genuuid_boot
+
+:genuuid_boot
+imgfree
+initrd ${assets}/startup.nsh /efi/boot/startup.nsh
+initrd ${assets}/AMIDEEFIx64.efi
+kernel ${assets}/BOOTX64.efi /efi/boot/BOOTX64.efi
+boot

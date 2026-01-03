@@ -1,0 +1,21 @@
+netboot_base_dir: /opt/appdata/rootful/netboot
+netboot_container_user: 1000
+netboot_container_group: 1000
+
+netboot_mac_chain:
+  - mac: 00e04c2a16b4
+    ipxe_content: chain talos-unattended.ipxe
+  - mac: 00e04c307532
+    ipxe_content: chain talos-unattended.ipxe
+  - mac: 00e04c30753b
+    ipxe_content: chain talos-unattended.ipxe
+
+netboot_talos_schematic:
+  | # 495176274ce8f9e87ed052dbc285c67b2a0ed7c5a6212f5c4d086e1a9a1cf614
+  customization:
+    systemExtensions:
+        officialExtensions:
+            - siderolabs/i915
+            - siderolabs/intel-ucode
+            - siderolabs/iscsi-tools
+            - siderolabs/thunderbolt

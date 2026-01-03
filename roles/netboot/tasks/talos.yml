@@ -1,0 +1,78 @@
+- name: Get Talos schematic
+  register: netboot_talos_schematic_lookup
+  ansible.builtin.uri:
+    url: https://factory.talos.dev/schematics
+    method: POST
+    body: "{{ netboot_talos_schematic }}"
+    status_code: 201
+    return_content: true
+    headers:
+      Content-Type: text/yaml
+
+- name: Set Talos schematic ID fact
+  ansible.builtin.set_fact:
+    netboot_talos_schematic_id: "{{ netboot_talos_schematic_lookup.content | from_json | json_query('id') }}"
+
+- name: Get Latest Talos version
+  register: netboot_talos_version_lookup
+  ansible.builtin.uri:
+    url: https://factory.talos.dev/versions
+    method: GET
+    return_content: true
+    status_code: 200
+
+- name: Set Talos version fact
+  ansible.builtin.set_fact:
+    netboot_talos_version: |-
+      {{ netboot_talos_version_lookup.content | from_json | map('regex_search', '^v((\d+).?){3}$') | list | flatten | last | replace('v', '') }}
+
+- name: Template ipxe file for Talos unattended install
+  when: netboot_talos_schematic_id is defined
+  become: true
+  ansible.builtin.template:
+    src: talos-unattended.ipxe.j2
+    dest: "{{ netboot_base_dir }}/config/menus{{ item }}/talos-unattended.ipxe"
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+  loop:
+    - ""
+    - /local
+
+- name: Create Talos version directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ netboot_base_dir }}/assets/{{ item }}"
+    state: directory
+    mode: "0775"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+  loop:
+    - talos
+    - talos/{{ netboot_talos_version }}
+
+- name: Download Talos kernel image
+  become: true
+  ansible.builtin.get_url:
+    timeout: 30
+    url: https://pxe.factory.talos.dev/image/{{ netboot_talos_schematic_id }}/v{{ netboot_talos_version }}/kernel-{{ item }}
+    dest: "{{ netboot_base_dir }}/assets/talos/{{ netboot_talos_version }}/kernel-{{ item }}"
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+  loop:
+    - amd64
+    - arm64
+
+- name: Download Talos initramfs image
+  become: true
+  ansible.builtin.get_url:
+    timeout: 30
+    url: https://pxe.factory.talos.dev/image/{{ netboot_talos_schematic_id }}/v{{ netboot_talos_version }}/initramfs-{{ item }}.xz
+    dest: "{{ netboot_base_dir }}/assets/talos/{{ netboot_talos_version }}/initramfs-{{ item }}.xz"
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+  loop:
+    - amd64
+    - arm64

@@ -1,0 +1,23 @@
+- name: Check if netboot menu file exists
+  become: true
+  ansible.builtin.stat:
+    path: /opt/appdata/rootful/netboot/config/menus/remote/menu.ipxe
+  register: netboot_cfg_file
+
+- name: Include menu tasks if menu file exist
+  when:
+    - netboot_cfg_file.stat.exists
+  ansible.builtin.include_tasks: menu.yml
+
+- name: Include chain tasks
+  ansible.builtin.include_tasks: chain.yml
+  when:
+    - netboot_mac_chain | length > 0
+
+- name: Include local tasks
+  ansible.builtin.include_tasks: local.yml
+
+- name: Include Talos tasks
+  when:
+    - netboot_talos_schematic != ""
+  ansible.builtin.include_tasks: talos.yml

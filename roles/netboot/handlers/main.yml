@@ -1,0 +1,6 @@
+- name: Restart netboot container
+  become: true
+  ansible.builtin.systemd:
+    name: netbootxyz.service
+    state: restarted
+    enabled: true

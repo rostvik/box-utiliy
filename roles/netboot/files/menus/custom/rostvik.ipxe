@@ -1,0 +1,33 @@
+#!ipxe
+######## CUSTOM MENU ########
+
+:custom_menu
+menu Rostvik Boot Options
+item --gap -- Custom Options:
+item talos_os Talos
+item ucore_nas uCore NAS
+item --gap -- Tools:
+item gen_uuid Randomize SMBIOS UUID
+item --gap -- Return:
+item return Return to Main Menu
+choose --default return --timeout 1000000 custom_target && goto ${custom_target}
+
+:talos_os
+chain ../talos-unattended.ipxe || goto error
+goto custom_menu
+
+:ucore_nas
+chain ../ucore.ipxe || goto error
+goto custom_menu
+
+:gen_uuid
+chain ../gen-uuid.ipxe || goto error
+goto custom_menu
+
+:error
+echo Error occurred, press any key to return to menu ...
+prompt
+goto return
+
+:return
+exit

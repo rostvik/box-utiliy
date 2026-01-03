@@ -1,0 +1,44 @@
+- name: Copy remote menu
+  become: true
+  ansible.builtin.copy:
+    src: "{{ netboot_base_dir }}/config/menus/remote/menu.ipxe"
+    dest: "{{ netboot_base_dir }}/config/menus/local/menu.ipxe"
+    remote_src: true
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+
+- name: Enable custom menu
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ netboot_base_dir }}/config/menus/local/menu.ipxe"
+    insertafter: item windows
+    line: item custom-user ${space} Rostvik Menu ||
+    firstmatch: true
+
+- name: Set custom menu
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ netboot_base_dir }}/config/menus/local/menu.ipxe"
+    insertafter: :custom-user
+    line: chain custom/rostvik.ipxe
+    search_string: chain custom/custom.ipxe
+
+- name: Copy menu to local
+  become: true
+  ansible.builtin.copy:
+    src: "{{ netboot_base_dir }}/config/menus/local/menu.ipxe"
+    dest: "{{ netboot_base_dir }}/config/menus/menu.ipxe"
+    remote_src: true
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"
+
+- name: Copy custom ipxe
+  become: true
+  ansible.builtin.copy:
+    src: files/menus/custom/rostvik.ipxe
+    dest: "{{ netboot_base_dir }}/config/menus/custom/rostvik.ipxe"
+    mode: "0644"
+    owner: "{{ netboot_container_user }}"
+    group: "{{ netboot_container_group }}"

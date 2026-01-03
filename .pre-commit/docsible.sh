@@ -3,11 +3,9 @@
 # arr=()
 
 
-source .venv/bin/activate
-
 for file in $(git diff --cached --name-only); do
     changed=$(echo $file | awk -F '/' '{print $1 "/" $2}')
-    dir_changed+="-r $changed\n"
+    [[ $changed == roles/* ]] && dir_changed+="-r $changed\n"
 done
 
 dir_changed=$(echo -en $dir_changed | uniq)

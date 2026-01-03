@@ -1,0 +1,402 @@
+- name: Fetch metadata
+  hosts: all
+  tags:
+    - always
+  tasks:
+    - name: Set become password from 1Password
+      ansible.builtin.set_fact:
+        ansible_become_password: "{{ lookup('community.general.onepassword', 'UtilityBox - Box', field='password', vault='Home-infra') }}"
+
+- name: Set up user
+  hosts: all
+  tags: [never, init]
+
+  tasks:
+    - name: Ensure groups exists
+      become: true
+      ansible.builtin.group:
+        name: &group roxedus
+        gid: 1000
+        state: present
+
+    - name: Add users
+      become: true
+      no_log: true
+      ansible.builtin.user:
+        name: roxedus
+        uid: 1000
+        group: &user roxedus
+        shell: /bin/bash
+
+    - name: Add a Github key ssh key
+      become: true
+      ansible.posix.authorized_key:
+        user: roxedus
+        key: https://github.com/roxedus.keys
+        manage_dir: true
+
+    - name: Basic VI
+      ansible.builtin.lineinfile:
+        mode: "0644"
+        owner: *user
+        group: *group
+        path: /home/roxedus/.vimrc
+        line: set nocompatible
+        create: true
+
+    - name: Basic tmux
+      ansible.builtin.copy:
+        mode: "0644"
+        owner: *user
+        group: *group
+        dest: /home/roxedus/.tmux.conf
+        content: |
+          # Enable mouse control (clickable windows, panes, resizable panes)
+          set -g mouse on
+
+          set-option -g set-titles on
+          set-option -g set-titles-string "#{host} > #{window_name}"
+
+          # split panes using | and -
+          bind | split-window -h
+          bind - split-window -v
+          unbind '"'
+          unbind %
+
+          # switch panes using Alt-arrow without prefix
+          bind -n M-Left select-pane -L
+          bind -n M-Right select-pane -R
+          bind -n M-Up select-pane -U
+          bind -n M-Down select-pane -D
+
+- name: Set up base
+  hosts: all
+  tags:
+    - base
+    - init
+
+  # https://github.com/ansible/ansible/issues/84803
+  # roles:
+  #   - role: geerlingguy.ntp
+  #     become: true
+  #   - role: geerlingguy.security
+  #     become: true
+
+  tasks:
+    - name: Install overlay package
+      become: true
+      notify:
+        - Reboot system
+      community.general.rpm_ostree_pkg:
+        name:
+          - bash-completion
+          - curl
+          - jq
+          - ncdu
+          - qemu-guest-agent
+          - tmux
+          - vim
+          - yq
+        state: present
+
+  handlers:
+    - name: Reboot system
+      become: true
+      ansible.builtin.reboot:
+        msg: Rebooting to apply base changes
+        pre_reboot_delay: 5
+        reboot_timeout: 600
+        test_command: whoami
+
+- name: Set up containers
+  hosts: all
+  tags:
+    - containers
+    - init
+
+  tasks:
+    - name: Create Quadlet file for rootless podman network
+      become: false
+      notify:
+        - Restart user daemon
+      containers.podman.podman_network:
+        name: util-rootless
+        state: quadlet
+        subnet: 172.20.1.0/28
+        quadlet_options:
+          - |
+            [Install]
+            WantedBy=default.target op_connect.service op_sync.service
+
+    - name: Create Quadlet file for rootful podman network
+      become: true
+      notify:
+        - Restart daemon
+      containers.podman.podman_network:
+        name: util-rootful
+        state: quadlet
+        subnet: 172.20.0.0/28
+        quadlet_options:
+          - |
+            [Install]
+            WantedBy=default.target netbootxyz.service
+
+    - name: Create appdata directory
+      become: true
+      ansible.builtin.file:
+        path: /opt/{{ item }}
+        state: directory
+        mode: "0775"
+        owner: *user
+        group: *group
+      loop:
+        - appdata
+        - appdata/rootless
+
+    - name: Create rootful appdata directory
+      become: true
+      ansible.builtin.file:
+        path: /opt/appdata/rootful
+        state: directory
+        mode: "0775"
+        owner: root
+        group: root
+
+    - name: Enable Linger for roxedus user
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/loginctl
+          - enable-linger
+          - roxedus
+        creates: /var/lib/systemd/linger/roxedus
+
+  handlers:
+    - name: Restart user daemon
+      become: false
+      ansible.builtin.systemd:
+        daemon_reload: true
+        scope: user
+
+    - &restart_podman
+      name: Restart daemon
+      become: true
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+- name: Set up netboot container
+  hosts: all
+  tags:
+    - containers
+    - netboot
+    - init
+
+  pre_tasks:
+    - name: Create netboot directories
+      become: true
+      ansible.builtin.file:
+        path: /opt/appdata/rootful/{{ item }}
+        state: directory
+        mode: "0775"
+        owner: *user
+        group: *group
+      loop:
+        - netboot
+        - netboot/assets
+        - netboot/config
+        - netboot/config/menus
+        - netboot/config/menus/custom
+        - netboot/config/menus/local
+        - netboot/config/menus/remote
+
+    - name: Create netboot container
+      become: true
+      notify:
+        - Restart daemon
+        - Restart netboot container
+      containers.podman.podman_container:
+        name: netbootxyz
+        image: ghcr.io/netbootxyz/netbootxyz:latest
+        network: util-rootful
+        volumes:
+          - /opt/appdata/rootful/netboot/assets:/assets:Z
+          - /opt/appdata/rootful/netboot/config:/config:Z
+        env:
+          NGINX_PORT: "8080"
+        log_driver: journald
+        state: quadlet
+        ports:
+          - 3000:3000
+          - 69:69/udp
+          - 8080:8080
+        quadlet_options:
+          - AutoUpdate=registry
+          - Pull=newer
+          - |
+            [Install]
+            WantedBy=default.target
+
+  roles:
+    - role: netboot
+
+  handlers:
+    - *restart_podman
+
+    - name: Restart netboot container
+      become: true
+      ansible.builtin.systemd:
+        name: netbootxyz.service
+        state: restarted
+        enabled: true
+
+- name: Set up onepassword containers
+  hosts: all
+  tags:
+    - containers
+    - onepassword
+    - init
+
+  pre_tasks:
+    - name: Create onepassword volume
+      containers.podman.podman_volume:
+        state: quadlet
+        name: onepassword
+        quadlet_options:
+          - |
+            [Install]
+            WantedBy=default.target op_connect.service op_sync.service
+
+    - name: Create onepassword secret
+      containers.podman.podman_secret:
+        state: present
+        name: onepassword
+        data: "{{ lookup('community.general.onepassword_doc', 'util-box Credentials File', vault='Seed Infra') | from_json | to_nice_json }}"
+
+    - name: Create onepassword connect container
+      notify:
+        - Restart connect container
+      containers.podman.podman_container:
+        name: op_connect
+        image: docker.io/1password/connect-api:latest
+        network: util-rootless.network
+        volumes:
+          - onepassword:/home/opuser/.op/data
+        secrets:
+          - onepassword
+        env:
+          OP_SESSION: /run/secrets/onepassword
+        log_driver: journald
+        state: quadlet
+        ports:
+          - 8280:8080
+        quadlet_options:
+          - AutoUpdate=registry
+          - Pull=newer
+          - |
+            [Install]
+            WantedBy=default.target op_sync.service
+
+    - name: Create onepassword sync container
+      notify:
+        - Restart sync container
+      containers.podman.podman_container:
+        name: op_sync
+        image: docker.io/1password/connect-sync:latest
+        network: util-rootless.network
+        volumes:
+          - onepassword:/home/opuser/.op/data
+        secrets:
+          - onepassword
+        env:
+          OP_SESSION: /run/secrets/onepassword
+        log_driver: journald
+        state: quadlet
+        quadlet_options:
+          - AutoUpdate=registry
+          - Pull=newer
+          - |
+            [Install]
+            WantedBy=default.target
+
+    - name: Open firewall for onepassword connect
+      become: true
+      ansible.posix.firewalld:
+        port: 8280/tcp
+        permanent: true
+        state: enabled
+
+  handlers:
+    - name: Restart connect container
+      ansible.builtin.systemd: &restart_rootless
+        name: op_connect.service
+        daemon_reload: true
+        state: restarted
+        enabled: true
+        scope: user
+
+    - name: Restart sync container
+      ansible.builtin.systemd:
+        <<: *restart_rootless
+        name: op_sync.service
+
+- name: Set up MeshCentral container
+  hosts: all
+  tags:
+    - containers
+    - meshcentral
+    - init
+
+  tasks:
+    - name: Create MeshCentral directories
+      become: true
+      ansible.builtin.file:
+        path: /opt/appdata/rootless/{{ item }}
+        state: directory
+        mode: "0775"
+        owner: *user
+        group: *group
+      loop:
+        - meshcentral
+        - meshcentral/data
+        - meshcentral/files
+        - meshcentral/backups
+
+    - name: Create MeshCentral container
+      notify:
+        - Restart meshcentral container
+      containers.podman.podman_container:
+        name: meshcentral
+        image: docker.io/typhonragewind/meshcentral:latest
+        network: util-rootless.network
+        volumes:
+          - /opt/appdata/rootless/meshcentral/data:/opt/meshcentral/meshcentral-data:Z
+          - /opt/appdata/rootless/meshcentral/files:/opt/meshcentral/meshcentral-files:Z
+          - /opt/appdata/rootless/meshcentral/backups:/opt/meshcentral/meshcentral-backups:Z
+        env:
+          HOSTNAME: utility.rostvik.site
+          REVERSE_PROXY: "false"
+          ALLOW_NEW_ACCOUNTS: "true"
+          WEBRTC: "true"
+          BACKUPS_PW: "{{ lookup('community.general.onepassword', 'Meshcentral - Container', field='password', vault='Home-infra') }}"
+        log_driver: journald
+        state: quadlet
+        ports:
+          - 8086:443
+        quadlet_options:
+          - AutoUpdate=registry
+          - Pull=newer
+          - |
+            [Install]
+            WantedBy=default.target
+
+    - name: Open firewall for meshcentral connect
+      become: true
+      ansible.posix.firewalld:
+        port: 8086/tcp
+        permanent: true
+        state: enabled
+
+  handlers:
+    - name: Restart meshcentral container
+      ansible.builtin.systemd:
+        <<: *restart_rootless
+        name: meshcentral.service
